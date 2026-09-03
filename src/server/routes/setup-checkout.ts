@@ -9,12 +9,12 @@
  * https://docs.whop.com/developer/guides/save-payment-methods
  */
 
-import type { Env } from "../env";
+import { resolveCompanyId, type Env } from "../env";
 import { createSetupCheckoutConfiguration, createWhopClient, WhopApiError } from "../whop-api";
 import { json } from "./leads";
 
 export async function handleSetupCheckout(request: Request, env: Env): Promise<Response> {
-  const companyId = env.WHOP_COMPANY_ID;
+  const companyId = resolveCompanyId(env);
   if (!companyId) {
     return json({ ok: false, error: "WHOP_COMPANY_ID is not set on this deployment." }, 500);
   }

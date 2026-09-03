@@ -1,15 +1,23 @@
 /**
  * Minimal, dependency-free Whop REST client.
  *
- * Runs on the Whop hosting runtime (Cloudflare Workers), so it uses `fetch`
- * and reads credentials from the request-scoped env binding rather than
- * `process.env`. `whop apps dev` and the hosted runtime both inject
- * `WHOP_API_KEY`; nothing here ever reaches the browser.
+ * Two ways to authenticate, picked automatically:
+ *
+ *  - **On Whop hosting**, there is no API key to hold. The runtime sets
+ *    `WHOP_API_ORIGIN`, and server-side `fetch` calls to that origin pass
+ *    through an outbound proxy that attaches the app's own key. The key never
+ *    reaches this code, so it cannot be read, logged, or bundled.
+ *  - **Anywhere else** — `whop apps dev`, a plain `vite dev`, the bootstrap
+ *    script — fall back to `api.whop.com` with an explicit `WHOP_API_KEY`.
+ *
+ * Either way the credential is server-side only and never reaches the browser.
+ *
+ * https://docs.whop.com/developer/websites/hosting
  */
 
 import type { Env } from "./env";
 
-const API_BASE = "https://api.whop.com/api/v1";
+const PUBLIC_API_ORIGIN = "https://api.whop.com";
 
 /**
  * Pin the dated API version so a platform change never silently alters the
@@ -38,15 +46,20 @@ export interface WhopClient {
 }
 
 export function createWhopClient(env: Env): WhopClient {
-  const apiKey = env.WHOP_API_KEY;
-  if (!apiKey) {
+  // The hosted proxy signs requests for us; only the fallback needs a key.
+  const proxyOrigin = env.WHOP_API_ORIGIN;
+  const apiKey = proxyOrigin ? undefined : env.WHOP_API_KEY;
+
+  if (!proxyOrigin && !apiKey) {
     throw new WhopApiError(
       500,
       null,
-      "WHOP_API_KEY is not set. `whop apps dev` injects it locally; " +
-        "the hosted runtime injects it in production.",
+      "No Whop credentials. On Whop hosting the runtime sets WHOP_API_ORIGIN " +
+        "and signs outbound calls; elsewhere set WHOP_API_KEY.",
     );
   }
+
+  const base = `${proxyOrigin ?? PUBLIC_API_ORIGIN}/api/v1`;
 
   return {
     async request<T>(
@@ -56,14 +69,15 @@ export function createWhopClient(env: Env): WhopClient {
       init?: { idempotencyKey?: string },
     ): Promise<T> {
       const headers: Record<string, string> = {
-        Authorization: `Bearer ${apiKey}`,
         "Api-Version-Date": API_VERSION_DATE,
         Accept: "application/json",
       };
+      // Omitted on Whop hosting so the proxy attaches the app's own key.
+      if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
       if (body !== undefined) headers["Content-Type"] = "application/json";
       if (init?.idempotencyKey) headers["Idempotency-Key"] = init.idempotencyKey;
 
-      const res = await fetch(`${API_BASE}${path}`, {
+      const res = await fetch(`${base}${path}`, {
         method,
         headers,
         body: body === undefined ? undefined : JSON.stringify(body),

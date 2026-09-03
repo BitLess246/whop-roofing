@@ -96,6 +96,12 @@ npm install
 whop apps deploy
 ```
 
+`whop apps deploy` preflights the project for Cloudflare Workers, which is what
+Whop hosting runs. This repo already satisfies it — `@cloudflare/vite-plugin`
+with `viteEnvironment: { name: "ssr" }` in `vite.config.ts`, and a
+`wrangler.jsonc` whose `main` points at `src/server/index.ts`. If you rename the
+route, update `name` in `wrangler.jsonc` to match.
+
 Your site is live at `https://<route>.whop.app`.
 
 ### Webhooks (recommended)
@@ -109,6 +115,22 @@ whop apps deploy
 Without `WHOP_WEBHOOK_SECRET` the endpoint refuses every delivery rather than
 trusting an unsigned payload — deliberate, since these events move money-adjacent
 state.
+
+### How the deployed site authenticates
+
+There is **no API key on the server**. Whop hosting routes server-side `fetch`
+calls through an outbound proxy that attaches the app's own key, and sets:
+
+| Binding | Used for |
+| --- | --- |
+| `WHOP_API_ORIGIN` | The API origin whose outbound calls the platform signs |
+| `WHOP_ACCOUNT_ID` | The `biz_` id of the account that owns the app |
+
+`src/server/whop-api.ts` prefers those and sends no `Authorization` header, so
+the key never reaches this code and cannot be logged or bundled. Off-platform —
+`npm run dev`, the bootstrap script — it falls back to `api.whop.com` with an
+explicit `WHOP_API_KEY`. `WHOP_COMPANY_ID` is therefore optional on a deployed
+site; set it only to sell for a different account than the one owning the app.
 
 ### App permissions
 

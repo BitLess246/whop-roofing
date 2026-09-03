@@ -12,7 +12,7 @@
  * https://docs.whop.com/api-reference/invoices/create-invoice
  */
 
-import type { Env } from "../env";
+import { resolveCompanyId, type Env } from "../env";
 import { createInvoice, createWhopClient, WhopApiError, type InvoiceLineItem } from "../whop-api";
 import { json } from "./leads";
 import siteConfig from "../../../site.config";
@@ -50,7 +50,7 @@ export async function handleCreateInvoice(request: Request, env: Env): Promise<R
     return json({ ok: false, error: "Wrong passcode." }, 401);
   }
 
-  const companyId = env.WHOP_COMPANY_ID;
+  const companyId = resolveCompanyId(env);
   if (!companyId) return json({ ok: false, error: "WHOP_COMPANY_ID is not set." }, 500);
 
   const collectionMethod =

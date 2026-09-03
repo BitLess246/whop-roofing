@@ -9,7 +9,7 @@
  * https://docs.whop.com/api-reference/leads/create-lead
  */
 
-import type { Env } from "../env";
+import { resolveCompanyId, type Env } from "../env";
 import { createLead, createWhopClient, WhopApiError } from "../whop-api";
 
 interface Body {
@@ -47,7 +47,7 @@ export async function handleCreateLead(request: Request, env: Env): Promise<Resp
     return json({ ok: false, error: "A 10-digit phone number is required." }, 422);
   if (!address) return json({ ok: false, error: "A property address is required." }, 422);
 
-  const companyId = env.WHOP_COMPANY_ID;
+  const companyId = resolveCompanyId(env);
   if (!companyId) {
     return json(
       {
