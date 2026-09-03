@@ -90,8 +90,15 @@ export interface ResolvedOffering extends OfferingDef {
   planId: string | null;
 }
 
+export type WhopEnvironment = "production" | "sandbox";
+
 /** Everything the browser is allowed to know. Serialized into the SSR'd HTML. */
 export interface PublicConfig {
+  /**
+   * Which Whop environment the Payment Elements talk to. Sandbox moves no real
+   * money, so a test checkout can be completed end to end.
+   */
+  environment: WhopEnvironment;
   site: SiteConfig;
   offerings: ResolvedOffering[];
   /** `biz_...`, needed by the Payments element group that renders BrandingElement. */

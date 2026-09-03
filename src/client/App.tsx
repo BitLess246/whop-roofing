@@ -9,7 +9,7 @@ import {
 import { WhopElements } from "@whop/elements-react";
 import { loadWhop } from "@whop/elements";
 import type { PublicConfig } from "../shared/types";
-import { ConfigProvider } from "./lib/config";
+import { ConfigProvider, useConfig } from "./lib/config";
 import { Router, useRouter } from "./lib/router";
 import { Layout } from "./components/Layout";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -28,6 +28,7 @@ export function App({ config, url }: { config: PublicConfig; url: string }) {
       <Router url={url}>
         <ElementsProvider>
           <Layout>
+            <SandboxBanner />
             <ErrorBoundary>
               <Routes />
             </ErrorBoundary>
@@ -53,6 +54,7 @@ export const useElementsFailed = () => useContext(ElementsFailedContext);
  * which the elements packages support by design.
  */
 function ElementsProvider({ children }: { children: ReactNode }) {
+  const { environment } = useConfig();
   const [elements, setElements] =
     useState<Promise<Awaited<ReturnType<typeof loadWhop>> | null> | null>(null);
   const [failed, setFailed] = useState(false);
@@ -76,10 +78,22 @@ function ElementsProvider({ children }: { children: ReactNode }) {
 
   return (
     <ElementsFailedContext.Provider value={failed}>
-      <WhopElements elements={elements} appearance={appearance}>
+      <WhopElements elements={elements} appearance={appearance} environment={environment}>
         {children}
       </WhopElements>
     </ElementsFailedContext.Provider>
+  );
+}
+
+/** Sandbox moves no real money — say so, rather than letting the page imply it does. */
+function SandboxBanner() {
+  const { environment } = useConfig();
+  if (environment !== "sandbox") return null;
+  return (
+    <p className="sandbox-banner" role="status">
+      <strong>Sandbox mode</strong> — checkout runs against Whop's test environment.
+      No real money moves and no card is charged.
+    </p>
   );
 }
 

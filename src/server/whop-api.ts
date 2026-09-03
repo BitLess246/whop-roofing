@@ -15,9 +15,11 @@
  * https://docs.whop.com/developer/websites/hosting
  */
 
-import type { Env } from "./env";
+import { resolveEnvironment, type Env } from "./env";
+import type { WhopEnvironment } from "../shared/types";
 
 const PUBLIC_API_ORIGIN = "https://api.whop.com";
+const SANDBOX_API_ORIGIN = "https://sandbox-api.whop.com";
 
 /**
  * Pin the dated API version so a platform change never silently alters the
@@ -45,21 +47,36 @@ export interface WhopClient {
   ): Promise<T>;
 }
 
-export function createWhopClient(env: Env): WhopClient {
-  // The hosted proxy signs requests for us; only the fallback needs a key.
-  const proxyOrigin = env.WHOP_API_ORIGIN;
-  const apiKey = proxyOrigin ? undefined : env.WHOP_API_KEY;
+/**
+ * @param override forces an environment regardless of `WHOP_ENVIRONMENT`.
+ *   Leads pass `"production"`: a lead is recorded against a Whop user, users
+ *   come from OAuth, and OAuth only exists in production — a production user id
+ *   is simply not found in the sandbox.
+ */
+export function createWhopClient(env: Env, override?: WhopEnvironment): WhopClient {
+  const sandbox = (override ?? resolveEnvironment(env)) === "sandbox";
+
+  // The hosting proxy only signs production calls, so sandbox always carries
+  // its own key — a separate account on a separate host.
+  const proxyOrigin = sandbox ? undefined : env.WHOP_API_ORIGIN;
+  const apiKey = sandbox
+    ? env.WHOP_SANDBOX_API_KEY
+    : proxyOrigin
+      ? undefined
+      : env.WHOP_API_KEY;
 
   if (!proxyOrigin && !apiKey) {
     throw new WhopApiError(
       500,
       null,
-      "No Whop credentials. On Whop hosting the runtime sets WHOP_API_ORIGIN " +
-        "and signs outbound calls; elsewhere set WHOP_API_KEY.",
+      sandbox
+        ? "WHOP_ENVIRONMENT is sandbox but WHOP_SANDBOX_API_KEY is not set."
+        : "No Whop credentials. On Whop hosting the runtime sets WHOP_API_ORIGIN " +
+          "and signs outbound calls; elsewhere set WHOP_API_KEY.",
     );
   }
 
-  const base = `${proxyOrigin ?? PUBLIC_API_ORIGIN}/api/v1`;
+  const base = `${proxyOrigin ?? (sandbox ? SANDBOX_API_ORIGIN : PUBLIC_API_ORIGIN)}/api/v1`;
 
   return {
     async request<T>(

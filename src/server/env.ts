@@ -9,7 +9,7 @@
  */
 
 import siteConfig from "../../site.config";
-import type { PublicConfig, ResolvedOffering } from "../shared/types";
+import type { PublicConfig, ResolvedOffering, WhopEnvironment } from "../shared/types";
 
 export interface Env {
   /**
@@ -37,6 +37,18 @@ export interface Env {
   WHOP_WEBHOOK_SECRET?: string;
   /** HMAC key for the signed sign-in cookie. */
   SESSION_SECRET?: string;
+
+  /**
+   * `sandbox` points every Whop call and every Payment Element at Whop's
+   * sandbox, where no real money moves. Anything else means production.
+   */
+  WHOP_ENVIRONMENT?: string;
+  /** Required in sandbox: the hosting proxy only signs production calls. */
+  WHOP_SANDBOX_API_KEY?: string;
+  /** Production account for leads while payments run in sandbox. Defaults to WHOP_ACCOUNT_ID. */
+  WHOP_LEAD_COMPANY_ID?: string;
+  /** Production product to attach leads to while payments run in sandbox. */
+  WHOP_LEAD_PRODUCT_ID?: string;
   /** Gate for the internal billing console at /admin/billing. */
   ADMIN_PASSCODE?: string;
 
@@ -48,6 +60,21 @@ export function readEnv(runtimeEnv?: Env): Env {
   const fromProcess =
     typeof process !== "undefined" && process.env ? (process.env as Env) : {};
   return { ...fromProcess, ...(runtimeEnv ?? {}) };
+}
+
+/**
+ * The account leads are recorded against. Leads follow the OAuth identity,
+ * which is always production, so this ignores a sandbox `WHOP_COMPANY_ID`.
+ */
+export function resolveLeadCompanyId(env: Env): string | null {
+  if (resolveEnvironment(env) === "sandbox") {
+    return env.WHOP_LEAD_COMPANY_ID ?? env.WHOP_ACCOUNT_ID ?? null;
+  }
+  return resolveCompanyId(env);
+}
+
+export function resolveEnvironment(env: Env): WhopEnvironment {
+  return env.WHOP_ENVIRONMENT?.toLowerCase() === "sandbox" ? "sandbox" : "production";
 }
 
 export function resolveOfferings(env: Env): ResolvedOffering[] {
@@ -63,6 +90,10 @@ export function resolveOfferings(env: Env): ResolvedOffering[] {
  * account than the one that owns the app.
  */
 export function resolveCompanyId(env: Env): string | null {
+  // In sandbox the runtime's own WHOP_ACCOUNT_ID names the *production*
+  // account that owns the app, which does not exist in the sandbox — so the
+  // sandbox account has to be named explicitly.
+  if (resolveEnvironment(env) === "sandbox") return env.WHOP_COMPANY_ID ?? null;
   return env.WHOP_COMPANY_ID ?? env.WHOP_ACCOUNT_ID ?? null;
 }
 
@@ -71,6 +102,7 @@ export function buildPublicConfig(env: Env, origin: string): PublicConfig {
   const companyId = resolveCompanyId(env);
   return {
     site: siteConfig,
+    environment: resolveEnvironment(env),
     offerings,
     companyId,
     origin,

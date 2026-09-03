@@ -9,7 +9,7 @@
  * https://docs.whop.com/api-reference/leads/create-lead
  */
 
-import { resolveCompanyId, type Env } from "../env";
+import { resolveLeadCompanyId, type Env } from "../env";
 import { readIdentity } from "./auth";
 import { createLead, createWhopClient, WhopApiError } from "../whop-api";
 
@@ -48,13 +48,14 @@ export async function handleCreateLead(request: Request, env: Env): Promise<Resp
     return json({ ok: false, error: "A 10-digit phone number is required." }, 422);
   if (!address) return json({ ok: false, error: "A property address is required." }, 422);
 
-  const companyId = resolveCompanyId(env);
+  const companyId = resolveLeadCompanyId(env);
   if (!companyId) {
     return json(
       {
         ok: false,
         error:
-          "WHOP_COMPANY_ID is not set. Run `whop apps secrets set WHOP_COMPANY_ID=biz_…` and redeploy.",
+          "No account to record leads against. Set WHOP_COMPANY_ID, or " +
+          "WHOP_LEAD_COMPANY_ID when payments run in sandbox.",
       },
       500,
     );
@@ -100,11 +101,13 @@ export async function handleCreateLead(request: Request, env: Env): Promise<Resp
   };
 
   try {
-    const client = createWhopClient(env);
+    // Always production: the lead's user comes from OAuth, which has no
+    // sandbox counterpart.
+    const client = createWhopClient(env, "production");
     const lead = await createLead(client, {
       company_id: companyId,
       user_id: identity.userId,
-      product_id: env.WHOP_PRODUCT_ID ?? null,
+      product_id: env.WHOP_LEAD_PRODUCT_ID ?? env.WHOP_PRODUCT_ID ?? null,
       referrer: str(body.referrer).slice(0, 500) || null,
       metadata,
     });

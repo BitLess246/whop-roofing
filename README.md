@@ -156,6 +156,38 @@ anonymous, drop the `readIdentity` check in `src/server/routes/leads.ts` and
 record the lead at checkout instead, where Whop resolves the buyer into a user
 on its own.
 
+### Sandbox mode
+
+Whop's sandbox is a **separate account on a separate host with its own API
+key** — not a flag on a production call. Set `WHOP_ENVIRONMENT=sandbox` and the
+site points its payment surfaces at it: the server calls
+`sandbox-api.whop.com` with `WHOP_SANDBOX_API_KEY`, the Payment Elements are
+constructed with `environment: "sandbox"`, and a banner tells the visitor no
+real money moves.
+
+```bash
+WHOP_SANDBOX_API_KEY=apik_xxx npm run bootstrap -- --sandbox   # sandbox plans
+whop apps secrets set --secret WHOP_ENVIRONMENT=sandbox \
+  --secret WHOP_SANDBOX_API_KEY=apik_xxx \
+  --secret WHOP_COMPANY_ID=biz_xxx \
+  --secret WHOP_PLAN_INSPECTION=plan_xxx   # …and the other two
+whop apps deploy
+```
+
+Flip back by unsetting `WHOP_ENVIRONMENT` and restoring the production plan IDs.
+
+**Leads stay in production even in sandbox mode.** A lead is recorded against a
+Whop user, users come from OAuth, and OAuth has no sandbox counterpart — a
+sandbox authorize request rejects a production app, and a production `user_id`
+is "not found" against the sandbox. So `/api/leads` forces the production client
+and records against `WHOP_LEAD_COMPANY_ID` (defaulting to `WHOP_ACCOUNT_ID`).
+Nothing about a lead moves money, so there is nothing to isolate.
+
+Sandbox API keys are issued narrowly. Beyond the production scopes above, a
+sandbox key needs `checkout_configuration:create` for the card-on-file step and
+`access_pass:create` to group plans under a product — without the latter the
+bootstrap script still creates the plans standalone.
+
 ### How the deployed site authenticates
 
 There is **no API key on the server**. Whop hosting routes server-side `fetch`

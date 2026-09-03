@@ -16,15 +16,27 @@
 
 import siteConfig from "../site.config";
 
-const API_BASE = "https://api.whop.com/api/v1";
 const API_VERSION_DATE = "2026-06-09";
 
-const apiKey = process.env.WHOP_API_KEY;
+/**
+ * Whop's sandbox is a separate account on a separate host with its own API
+ * key, so pointing this script at it is a host swap plus a different key —
+ * never a flag on a production call.
+ */
+const useSandbox = process.argv.includes("--sandbox");
+const API_BASE = useSandbox
+  ? "https://sandbox-api.whop.com/api/v1"
+  : "https://api.whop.com/api/v1";
+
+const apiKey = useSandbox
+  ? process.env.WHOP_SANDBOX_API_KEY ?? process.env.WHOP_API_KEY
+  : process.env.WHOP_API_KEY;
+
 const dryRun = process.argv.includes("--dry-run");
 
 if (!apiKey && !dryRun) {
   fail(
-    "WHOP_API_KEY is not set.\n" +
+    `${useSandbox ? "WHOP_SANDBOX_API_KEY" : "WHOP_API_KEY"} is not set.\n` +
       "Create an account API key under Developer in your Whop dashboard, then:\n" +
       "  WHOP_API_KEY=whop_xxx npm run bootstrap",
   );
@@ -62,20 +74,32 @@ async function main() {
 
   const companyId = await resolveCompanyId();
 
-  const product = await api<{ id: string; title: string }>("POST", "/products", {
-    company_id: companyId,
-    title: `${siteConfig.company.name} — Roofing Services`,
-    description: siteConfig.company.tagline,
-    visibility: "visible",
-  });
-  console.log(`Product   ${product.id}  ${product.title}\n`);
+  // A product groups the plans on the storefront, but plans stand on their own.
+  // Sandbox keys are often issued without `access_pass:create`, so a missing
+  // product is a warning rather than a dead end.
+  let productId: string | null = null;
+  try {
+    const product = await api<{ id: string; title: string }>("POST", "/products", {
+      company_id: companyId,
+      title: `${siteConfig.company.name} — Roofing Services`,
+      description: siteConfig.company.tagline,
+      visibility: "visible",
+    });
+    productId = product.id;
+    console.log(`Product   ${product.id}  ${product.title}\n`);
+  } catch (err) {
+    console.log(
+      `Product   skipped — ${err instanceof Error ? err.message.split("\n")[0] : err}\n` +
+        "          Plans are created standalone; add access_pass:create to group them.\n",
+    );
+  }
 
   const created: { env: string; id: string; title: string; price: number }[] = [];
 
   for (const spec of planSpecs) {
     const plan = await api<{ id: string }>("POST", "/plans", {
       account_id: companyId,
-      product_id: product.id,
+      ...(productId ? { product_id: productId } : {}),
       plan_type: "one_time",
       release_method: "buy_now",
       currency: "usd",
@@ -93,7 +117,8 @@ async function main() {
   console.log("\n" + "-".repeat(72));
   console.log("Set these as app secrets, then redeploy:\n");
   console.log(`  whop apps secrets set WHOP_COMPANY_ID=${companyId}`);
-  console.log(`  whop apps secrets set WHOP_PRODUCT_ID=${product.id}`);
+  if (productId) console.log(`  whop apps secrets set WHOP_PRODUCT_ID=${productId}`);
+  if (useSandbox) console.log(`  whop apps secrets set WHOP_ENVIRONMENT=sandbox`);
   for (const plan of created) {
     console.log(`  whop apps secrets set ${plan.env}=${plan.id}`);
   }
@@ -151,9 +176,8 @@ async function api<T>(method: string, path: string, body?: unknown): Promise<T> 
 
   const text = await res.text();
   if (!res.ok) {
-    fail(
-      `${method} ${path} failed (${res.status})\n${text}\n\n` +
-        "If this is a permissions error, the API key needs product and plan write access.",
+    throw new Error(
+      `${method} ${path} failed (${res.status})\n${text}`,
     );
   }
   return (text ? JSON.parse(text) : {}) as T;
@@ -169,7 +193,9 @@ function parsePrice(label: string): number {
 
 function banner() {
   console.log("");
-  console.log(`  ${siteConfig.company.name} — Whop account bootstrap`);
+  console.log(
+    `  ${siteConfig.company.name} — Whop account bootstrap${useSandbox ? " (SANDBOX)" : ""}`,
+  );
   console.log(`  ${"=".repeat(46)}`);
   console.log("");
 }
