@@ -4,6 +4,9 @@ export interface ApiResult<T> {
   ok: boolean;
   data?: T;
   error?: string;
+  /** Set when the visitor must sign in with Whop before the call can succeed. */
+  needsAuth?: boolean;
+  authUrl?: string;
 }
 
 async function post<T>(path: string, body: unknown): Promise<ApiResult<T>> {
@@ -14,7 +17,14 @@ async function post<T>(path: string, body: unknown): Promise<ApiResult<T>> {
       body: JSON.stringify(body),
     });
     const json = (await res.json()) as ApiResult<T>;
-    if (!res.ok) return { ok: false, error: json?.error ?? `Request failed (${res.status})` };
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: json?.error ?? `Request failed (${res.status})`,
+        needsAuth: json?.needsAuth,
+        authUrl: json?.authUrl,
+      };
+    }
     return json;
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Network error" };

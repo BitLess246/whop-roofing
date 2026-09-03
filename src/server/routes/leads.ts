@@ -10,6 +10,7 @@
  */
 
 import { resolveCompanyId, type Env } from "../env";
+import { readIdentity } from "./auth";
 import { createLead, createWhopClient, WhopApiError } from "../whop-api";
 
 interface Body {
@@ -59,6 +60,22 @@ export async function handleCreateLead(request: Request, env: Env): Promise<Resp
     );
   }
 
+  // Whop records a lead against a Whop user: `POST /leads` requires a
+  // `user_id`, and nothing in the API mints a user from an email. So the
+  // visitor signs in with Whop first, and the form resubmits afterwards.
+  const identity = await readIdentity(request, env);
+  if (!identity) {
+    return json(
+      {
+        ok: false,
+        needsAuth: true,
+        authUrl: "/api/auth/start?return=/estimate",
+        error: "Sign in with Whop to send your request.",
+      },
+      401,
+    );
+  }
+
   const utm = plainStrings(body.utm);
 
   // Whop stores lead metadata as free-form JSON: the homeowner's contact
@@ -75,6 +92,10 @@ export async function handleCreateLead(request: Request, env: Env): Promise<Resp
     roof_age: str(body.roofAge) || "Not specified",
     details: str(body.details).slice(0, MAX) || "—",
     submitted_at: new Date().toISOString(),
+    // The Whop account this lead is attached to, kept alongside what the
+    // homeowner typed so the two are reconcilable if they differ.
+    whop_user_id: identity.userId,
+    ...(identity.email ? { whop_user_email: identity.email } : {}),
     ...utm,
   };
 
@@ -82,6 +103,7 @@ export async function handleCreateLead(request: Request, env: Env): Promise<Resp
     const client = createWhopClient(env);
     const lead = await createLead(client, {
       company_id: companyId,
+      user_id: identity.userId,
       product_id: env.WHOP_PRODUCT_ID ?? null,
       referrer: str(body.referrer).slice(0, 500) || null,
       metadata,

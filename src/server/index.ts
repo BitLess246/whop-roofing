@@ -12,6 +12,7 @@ import { handleCreateLead, json } from "./routes/leads";
 import { handleSetupCheckout } from "./routes/setup-checkout";
 import { handleCreateInvoice } from "./routes/invoices";
 import { handleWebhook } from "./routes/webhooks";
+import { handleAuthCallback, handleAuthStart } from "./routes/auth";
 import siteConfig from "../../site.config";
 
 /** Injected by Vite at build time; used to bust asset caches across deploys. */
@@ -95,6 +96,12 @@ export default {
 };
 
 async function handleApi(request: Request, env: Env, url: URL): Promise<Response> {
+  // The OAuth endpoints are browser redirects, so they are GETs.
+  if (request.method === "GET") {
+    if (url.pathname === "/api/auth/start") return handleAuthStart(request, env);
+    if (url.pathname === "/api/auth/callback") return handleAuthCallback(request, env);
+  }
+
   if (request.method !== "POST") {
     return json({ ok: false, error: "Use POST." }, 405);
   }

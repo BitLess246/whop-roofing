@@ -8,13 +8,30 @@
  * returned lead ID so a retry or a refresh cannot double-count it.
  */
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useConfig } from "../lib/config";
 import { submitEstimate } from "../lib/api";
 import { EVENTS, track } from "../lib/track";
 import { Check } from "./Icons";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * Whop records a lead against a Whop user, so submitting sends the homeowner
+ * through a one-click Whop sign-in and then resubmits by itself. What they
+ * typed is parked here across the redirect so nothing is retyped.
+ */
+const DRAFT_KEY = "roofing_estimate_draft";
+
+const AUTH_ERRORS: Record<string, string> = {
+  denied: "Sign-in was cancelled, so nothing was sent. Try again, or just call us.",
+  expired: "That sign-in link timed out. Please try again.",
+  state: "The sign-in could not be verified. Please try again.",
+  exchange: "We could not complete the sign-in with Whop. Please try again.",
+  identity: "Whop did not return an account we could use. Please call us instead.",
+  config: "Sign-in is not configured on this deployment.",
+  unknown: "Something went wrong signing in. Please try again.",
+};
 
 interface Errors {
   [field: string]: string | undefined;
@@ -38,6 +55,7 @@ export function EstimateForm({ compact = false }: { compact?: boolean }) {
   const [status, setStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [serverError, setServerError] = useState<string | null>(null);
   const [leadId, setLeadId] = useState<string | null>(null);
+  const resumed = useRef(false);
 
   const set = (field: keyof typeof values) => (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>,
@@ -56,24 +74,38 @@ export function EstimateForm({ compact = false }: { compact?: boolean }) {
     return Object.keys(next).length === 0;
   }
 
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault();
-    if (status === "sending") return;
-    if (!validate()) return;
-
+  async function send(payload: typeof values) {
     setStatus("sending");
     setServerError(null);
 
     const result = await submitEstimate({
-      ...values,
+      ...payload,
       referrer: typeof document !== "undefined" ? document.referrer || window.location.href : undefined,
       utm: readUtm(),
     });
+
+    // Not signed in yet: park the draft and hand the visitor to Whop.
+    if (result.needsAuth && result.authUrl) {
+      try {
+        sessionStorage.setItem(DRAFT_KEY, JSON.stringify(payload));
+      } catch {
+        /* private mode — the fields are still on screen when they come back */
+      }
+      const here = window.location.pathname;
+      window.location.href = `${result.authUrl}${result.authUrl.includes("?") ? "&" : "?"}return=${encodeURIComponent(here)}`;
+      return;
+    }
 
     if (!result.ok || !result.data) {
       setStatus("error");
       setServerError(result.error ?? "Something went wrong. Call us and we will take it down by hand.");
       return;
+    }
+
+    try {
+      sessionStorage.removeItem(DRAFT_KEY);
+    } catch {
+      /* nothing to clear */
     }
 
     setLeadId(result.data.leadId);
@@ -83,10 +115,47 @@ export function EstimateForm({ compact = false }: { compact?: boolean }) {
     // conversion mirrored from a webhook is counted once.
     track(EVENTS.ESTIMATE_REQUESTED, {
       event_id: result.data.leadId,
-      project_type: values.projectType,
-      urgency: values.urgency,
+      project_type: payload.projectType,
+      urgency: payload.urgency,
     });
   }
+
+  function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (status === "sending") return;
+    if (!validate()) return;
+    void send(values);
+  }
+
+  // Coming back from Whop: restore the draft and finish the submission.
+  useEffect(() => {
+    if (resumed.current) return;
+    resumed.current = true;
+
+    const params = new URLSearchParams(window.location.search);
+    const authError = params.get("auth_error");
+    let draft: typeof values | null = null;
+    try {
+      const raw = sessionStorage.getItem(DRAFT_KEY);
+      if (raw) draft = JSON.parse(raw) as typeof values;
+    } catch {
+      draft = null;
+    }
+
+    if (draft) setValues(draft);
+
+    if (authError) {
+      setStatus("error");
+      setServerError(AUTH_ERRORS[authError] ?? AUTH_ERRORS.unknown!);
+      stripQuery();
+      return;
+    }
+
+    if (params.get("signed_in") === "1" && draft) {
+      stripQuery();
+      void send(draft);
+    }
+  }, []);
 
   if (status === "sent") {
     return (
@@ -165,7 +234,10 @@ export function EstimateForm({ compact = false }: { compact?: boolean }) {
         {status === "sending" ? "Sending…" : "Request my free estimate"}
       </button>
 
-      <p className="muted small consent">{form.consent}</p>
+      <p className="muted small consent">
+        Sending signs you in with Whop so your request lands on our board and you
+        can track it. {form.consent}
+      </p>
     </form>
   );
 }
@@ -186,6 +258,14 @@ function Field({
       {error && <p className="form-error">{error}</p>}
     </div>
   );
+}
+
+/** Drop `signed_in` / `auth_error` so a refresh cannot replay the submission. */
+function stripQuery() {
+  const url = new URL(window.location.href);
+  url.searchParams.delete("signed_in");
+  url.searchParams.delete("auth_error");
+  window.history.replaceState({}, "", url.pathname + (url.search || "") + url.hash);
 }
 
 function readUtm(): Record<string, string> {

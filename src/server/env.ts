@@ -35,6 +35,8 @@ export interface Env {
   WHOP_PLAN_REPAIR?: string;
   WHOP_PLAN_DEPOSIT?: string;
   WHOP_WEBHOOK_SECRET?: string;
+  /** HMAC key for the signed sign-in cookie. */
+  SESSION_SECRET?: string;
   /** Gate for the internal billing console at /admin/billing. */
   ADMIN_PASSCODE?: string;
 

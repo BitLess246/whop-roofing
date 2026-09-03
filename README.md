@@ -16,7 +16,7 @@ Re-skinning it for a different roofer is one config file and one bootstrap comma
 
 | Step | What happens | Whop feature |
 | --- | --- | --- |
-| Homeowner asks for a quote | `/estimate` posts to `/api/leads` | **Leads API** (`POST /leads`) |
+| Homeowner asks for a quote | `/estimate` posts to `/api/leads` | **OAuth** + **Leads API** (`POST /leads`) |
 | Homeowner books an inspection or repair | Checkout for a one-time plan | **CheckoutElement** + **ExpressCheckoutElement** |
 | Homeowner reserves a replacement | $500 deposit checkout | Same elements, `mode: "deposit"` plan |
 | Card kept for the balance | `/card-on-file` mounts a `mode: "setup"` checkout configuration | **Setup intents** via **Checkout Configurations** |
@@ -115,6 +115,46 @@ whop apps deploy
 Without `WHOP_WEBHOOK_SECRET` the endpoint refuses every delivery rather than
 trusting an unsigned payload — deliberate, since these events move money-adjacent
 state.
+
+### Why the estimate form signs the visitor in
+
+Whop records a lead against a Whop **user**: `POST /leads` requires a `user_id`,
+and nothing in the public API mints a user from an email address — `email` and
+`user_email` are rejected, there is no `POST /users`, and user search matches
+names and usernames rather than emails. So a real lead needs an identified
+visitor, and OAuth is the documented way to get one.
+
+Submitting the form therefore sends the homeowner through a one-click Whop
+sign-in and resubmits by itself on the way back; the draft is parked in
+`sessionStorage` so nothing is retyped. The whole exchange is server-side
+(`src/server/routes/auth.ts`): PKCE with S256, the verifier and nonce in an
+httpOnly cookie, and only a signed user id kept afterwards — the access token is
+discarded, because the lead is written with the app's own credentials and
+nothing needs to act on the visitor's behalf.
+
+The app must be registered as a **public** OAuth client with the callback URL
+allowed, which is one API call and needs no client secret:
+
+```bash
+curl -X PATCH https://api.whop.com/api/v1/apps/app_xxxxxxxx \
+  -H "Authorization: Bearer $WHOP_API_KEY" -H "Api-Version-Date: 2026-06-09" \
+  -H "Content-Type: application/json" -d '{
+    "redirect_uris":["https://<route>.whop.site/api/auth/callback"],
+    "oauth_client_type":"public"
+  }'
+```
+
+Then set a signing key for the session cookie:
+
+```bash
+whop apps secrets set --secret SESSION_SECRET=<32+ random chars>
+```
+
+**This is a real conversion tradeoff on a roofing site**, and it is Whop's
+constraint rather than a design choice. If you would rather keep the form
+anonymous, drop the `readIdentity` check in `src/server/routes/leads.ts` and
+record the lead at checkout instead, where Whop resolves the buyer into a user
+on its own.
 
 ### How the deployed site authenticates
 
@@ -222,6 +262,7 @@ src/client/
 | `/services/:slug` | Service detail — fires `service_viewed` |
 | `/book/:offering` | Checkout — fires `deposit_started` or `checkout_viewed` |
 | `/estimate` | Estimate form — fires `estimate_requested` on a created lead |
+| `/api/auth/start`, `/api/auth/callback` | Whop OAuth, so the lead has a user |
 | `/card-on-file` | Setup-mode checkout — fires `card_on_file_started` |
 | `/thank-you` | Post-checkout return URL |
 | `/admin/billing` | Internal invoice console, gated by `ADMIN_PASSCODE` |
