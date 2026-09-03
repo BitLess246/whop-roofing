@@ -1,0 +1,10 @@
+{
+  // Whop hosting runs the site on Cloudflare Workers. `main` is the worker
+  // entry the Vite build compiles into dist/server/index.js; the client build
+  // in dist/client is served as static assets in front of it.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ironclad-roofing-tx",
+  "compatibility_date": "2026-09-03",
+  "compatibility_flags": ["nodejs_compat"],
+  "main": "src/server/index.ts"
+}
